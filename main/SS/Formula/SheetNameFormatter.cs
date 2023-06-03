@@ -45,13 +45,17 @@ namespace NPOI.SS.Formula
         {
             // no instances of this class
         }
+
         /**
          * Used to format sheet names as they would appear in cell formula expressions.
          * @return the sheet name UnChanged if there is no need for delimiting.  Otherwise the sheet
          * name is enclosed in single quotes (').  Any single quotes which were already present in the 
          * sheet name will be converted to double single quotes ('').  
          */
-        public static String Format(String rawSheetName)
+        public static String Format(string rawSheetName)
+            => Format(rawSheetName.AsSpan());
+
+        internal static String Format(ReadOnlySpan<char> rawSheetName)
         {
             StringBuilder sb = new StringBuilder(rawSheetName.Length + 2);
             AppendFormat(sb, rawSheetName);
@@ -63,7 +67,10 @@ namespace NPOI.SS.Formula
          * 
          * @param out - sheet name will be Appended here possibly with delimiting quotes 
          */
-        public static void AppendFormat(StringBuilder out1, String rawSheetName)
+        public static void AppendFormat(StringBuilder out1, string rawSheetName)
+            => AppendFormat(out1, rawSheetName.AsSpan());
+
+        internal static void AppendFormat(StringBuilder out1, ReadOnlySpan<char> rawSheetName)
         {
             bool needsQuotes = NeedsDelimiting(rawSheetName);
             if (needsQuotes)
@@ -74,18 +81,23 @@ namespace NPOI.SS.Formula
             }
             else
             {
-                out1.Append(rawSheetName);
+                // TODO
+                out1.Append(rawSheetName.ToString());
             }
         }
 
-        public static void AppendFormat(StringBuilder out1, String workbookName, String rawSheetName)
+        public static void AppendFormat(StringBuilder out1, string workbookName, string rawSheetName)
+            => AppendFormat(out1, workbookName.AsSpan(), rawSheetName.AsSpan());
+
+        public static void AppendFormat(StringBuilder out1, ReadOnlySpan<char> workbookName, ReadOnlySpan<char> rawSheetName)
         {
             bool needsQuotes = NeedsDelimiting(workbookName) || NeedsDelimiting(rawSheetName);
             if (needsQuotes)
             {
                 out1.Append(DELIMITER);
                 out1.Append('[');
-                AppendAndEscape(out1, workbookName.Replace('[', '(').Replace(']', ')'));
+                // TODO
+                AppendAndEscape(out1, workbookName.ToString().Replace('[', '(').Replace(']', ')').AsSpan());
                 out1.Append(']');
                 AppendAndEscape(out1, rawSheetName);
                 out1.Append(DELIMITER);
@@ -93,13 +105,15 @@ namespace NPOI.SS.Formula
             else
             {
                 out1.Append('[');
-                out1.Append(workbookName);
+                // TODO
+                out1.Append(workbookName.ToString());
                 out1.Append(']');
-                out1.Append(rawSheetName);
+                // TODO
+                out1.Append(rawSheetName.ToString());
             }
         }
 
-        private static void AppendAndEscape(StringBuilder sb, String rawSheetName)
+        private static void AppendAndEscape(StringBuilder sb, ReadOnlySpan<char> rawSheetName)
         {
             int len = rawSheetName.Length;
             for (int i = 0; i < len; i++)
@@ -114,7 +128,7 @@ namespace NPOI.SS.Formula
             }
         }
 
-        private static bool NeedsDelimiting(String rawSheetName)
+        private static bool NeedsDelimiting(ReadOnlySpan<char> rawSheetName)
         {
             int len = rawSheetName.Length;
             if (len < 1)
@@ -149,16 +163,16 @@ namespace NPOI.SS.Formula
             }
             return false;
         }
-        private static bool NameLooksLikeBooleanLiteral(String rawSheetName)
+        private static bool NameLooksLikeBooleanLiteral(ReadOnlySpan<char> rawSheetName)
         {
             switch (rawSheetName[0])
             {
                 case 'T':
                 case 't':
-                    return "TRUE".Equals(rawSheetName, StringComparison.OrdinalIgnoreCase);
+                    return "TRUE".AsSpan().Equals(rawSheetName, StringComparison.OrdinalIgnoreCase);
                 case 'F':
                 case 'f':
-                    return "FALSE".Equals(rawSheetName, StringComparison.OrdinalIgnoreCase);
+                    return "FALSE".AsSpan().Equals(rawSheetName, StringComparison.OrdinalIgnoreCase);
             }
             return false;
         }
@@ -214,7 +228,7 @@ namespace NPOI.SS.Formula
          * the maximum sheet size varies across versions.
          * @see org.apache.poi.hssf.util.CellReference
          */
-        public static bool CellReferenceIsWithinRange(String lettersPrefix, String numbersSuffix)
+        public static bool CellReferenceIsWithinRange(ReadOnlySpan<char> lettersPrefix, ReadOnlySpan<char> numbersSuffix)
         {
             return NPOI.SS.Util.CellReference.CellReferenceIsWithinRange(lettersPrefix, numbersSuffix, NPOI.SS.SpreadsheetVersion.EXCEL97);
         }
@@ -241,19 +255,20 @@ namespace NPOI.SS.Formula
          * @return <c>true</c> if there is any possible ambiguity that the specified rawSheetName
          * could be interpreted as a valid cell name.
          */
-        public static bool NameLooksLikePlainCellReference(String rawSheetName)
+        public static bool NameLooksLikePlainCellReference(ReadOnlySpan<char> rawSheetName)
         {
             Regex matcher = new Regex(CELL_REF_PATTERN);
-            if (!matcher.IsMatch(rawSheetName))
+            var input = rawSheetName.ToString();
+            if (!matcher.IsMatch(input))
             {
                 return false;
             }
 
-            Match match = matcher.Matches(rawSheetName)[0];
+            Match match = matcher.Matches(input)[0];
             // rawSheetName == "Sheet1" Gets this far.
             String lettersPrefix = match.Groups[1].Value;
             String numbersSuffix = match.Groups[2].Value;
-            return CellReferenceIsWithinRange(lettersPrefix, numbersSuffix);
+            return CellReferenceIsWithinRange(lettersPrefix.AsSpan(), numbersSuffix.AsSpan());
         }
 
     }

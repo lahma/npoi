@@ -38,7 +38,7 @@ namespace NPOI.SS.Formula
         public ParseNode(Ptg token, ParseNode[] children)
         {
             _token = token;
-            _children = (ParseNode[])children.Clone();
+            _children = children.Length > 0 ? (ParseNode[])children.Clone() : Array.Empty<ParseNode>();
             _isIf = IsIf(token);
             int tokenCount = 1;
             for (int i = 0; i < children.Length; i++)

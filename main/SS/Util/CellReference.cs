@@ -109,6 +109,20 @@ namespace NPOI.SS.Util
         private bool _isRowAbs;
         private bool _isColAbs;
 
+        // cached strings for common values
+        private static string[] _columnNumberToString = Array.Empty<string>();
+
+        static CellReference()
+        {
+            var temp = new string[512];
+            for (var i = 0; i < temp.Length; ++i)
+            {
+                temp[i] = ConvertNumToColString(i);
+            }
+
+            _columnNumberToString = temp;
+        }
+
         /**
          * Create an cell ref from a string representation.  Sheet names containing special characters should be
          * delimited and escaped as per normal syntax rules for formulas.
@@ -264,40 +278,44 @@ namespace NPOI.SS.Util
         }
         public static NameType ClassifyCellReference(String str, SpreadsheetVersion ssVersion)
         {
-            int len = str.Length;
-            if (len < 1)
+            if (!TryParseCellReferenceFast(str, out var letters, out var digits))
             {
-                throw new ArgumentException("Empty string not allowed");
+                int len = str.Length;
+                if (len < 1)
+                {
+                    throw new ArgumentException("Empty string not allowed");
+                }
+                char firstChar = str[0];
+                switch (firstChar)
+                {
+                    case ABSOLUTE_REFERENCE_MARKER:
+                    case '.':
+                    case '_':
+                        break;
+                    default:
+                        if (!Char.IsLetter(firstChar) && !Char.IsDigit(firstChar))
+                        {
+                            throw new ArgumentException("Invalid first char (" + firstChar
+                                                                               + ") of cell reference or named range.  Letter expected");
+                        }
+                        break;
+                }
+                if (!Char.IsDigit(str[len - 1]))
+                {
+                    // no digits at end of str
+                    return ValidateNamedRangeName(str, ssVersion);
+                }
+                Regex cellRefPatternMatcher = STRICTLY_CELL_REF_PATTERN;
+                MatchCollection matches = cellRefPatternMatcher.Matches(str);
+                if (matches.Count == 0)
+                {
+                    return ValidateNamedRangeName(str, ssVersion);
+                }
+                letters = matches[0].Groups[1].Value.AsSpan();
+                digits = matches[0].Groups[2].Value.AsSpan();
             }
-            char firstChar = str[0];
-            switch (firstChar)
-            {
-                case ABSOLUTE_REFERENCE_MARKER:
-                case '.':
-                case '_':
-                    break;
-                default:
-                    if (!Char.IsLetter(firstChar) && !Char.IsDigit(firstChar))
-                    {
-                        throw new ArgumentException("Invalid first char (" + firstChar
-                                + ") of cell reference or named range.  Letter expected");
-                    }
-                    break;
-            }
-            if (!Char.IsDigit(str[len - 1]))
-            {
-                // no digits at end of str
-                return ValidateNamedRangeName(str, ssVersion);
-            }
-            Regex cellRefPatternMatcher = STRICTLY_CELL_REF_PATTERN;
-            if (!cellRefPatternMatcher.IsMatch(str))
-            {
-                return ValidateNamedRangeName(str, ssVersion);
-            }
-            MatchCollection matches = cellRefPatternMatcher.Matches(str);
-            string lettersGroup = matches[0].Groups[1].Value;
-            string digitsGroup = matches[0].Groups[2].Value;
-            if (CellReferenceIsWithinRange(lettersGroup, digitsGroup, ssVersion))
+
+            if (CellReferenceIsWithinRange(letters, digits, ssVersion))
             {
                 // valid cell reference
                 return NameType.Cell;
@@ -314,6 +332,35 @@ namespace NPOI.SS.Util
             }
             return NameType.NamedRange;
         }
+
+        private static bool TryParseCellReferenceFast(string str, out ReadOnlySpan<char> letters, out ReadOnlySpan<char> digits)
+        {
+            // try fast path for single letter followed by digits
+            if (str.Length > 1 && char.IsLetter(str[0]) && char.IsDigit(str[1]))
+            {
+                bool allDigits = true;
+                for (var i = 2; i < str.Length; ++i)
+                {
+                    if (!char.IsDigit(str[i]))
+                    {
+                        allDigits = false;
+                        break;
+                    }
+                }
+
+                if (allDigits)
+                {
+                    letters = str.AsSpan(0, 1);
+                    digits = str.AsSpan(1);
+                    return true;
+                }
+            }
+
+            letters = null;
+            digits = null;
+            return false;
+        }
+
         private static NameType ValidateNamedRangeName(String str, SpreadsheetVersion ssVersion)
         {
             Regex colMatcher = COLUMN_REF_PATTERN;
@@ -321,7 +368,7 @@ namespace NPOI.SS.Util
             if (colMatcher.IsMatch(str))
             {
                 Group colStr = colMatcher.Matches(str)[0].Groups[1];
-                if (IsColumnWithinRange(colStr.Value, ssVersion))
+                if (IsColumnWithinRange(colStr.Value.AsSpan(), ssVersion))
                 {
                     return NameType.Column;
                 }
@@ -330,7 +377,7 @@ namespace NPOI.SS.Util
             if (rowMatcher.IsMatch(str))
             {
                 Group rowStr = rowMatcher.Matches(str)[0].Groups[1];
-                if (IsRowWithinRange(rowStr.Value, ssVersion))
+                if (IsRowWithinRange(rowStr.Value.AsSpan(), ssVersion))
                 {
                     return NameType.Row;
                 }
@@ -348,11 +395,20 @@ namespace NPOI.SS.Util
          */
         public static String ConvertNumToColString(int col)
         {
+            // quick check for small numbers
+            var temp = _columnNumberToString;
+            if ((uint)col < temp.Length)
+            {
+                return temp[col];
+            }
+
             // Excel counts column A as the 1st column, we
             //  treat it as the 0th one
             int excelColNum = col + 1;
 
-            StringBuilder colRef = new StringBuilder(2);
+            // XFE is largest value per Excel max spec (1,048,576 rows by 16,384 columns)
+            Span<char> colRef = stackalloc char[3];
+            int index = colRef.Length - 1;
             int colRemain = excelColNum;
 
             while (colRemain > 0)
@@ -363,24 +419,20 @@ namespace NPOI.SS.Util
 
                 // The letter A is at 65
                 char colChar = (char)(thisPart + 64);
-                colRef.Insert(0, colChar);
+                colRef[index--] = colChar;
             }
 
-            return colRef.ToString();
+            // we decremented one extra
+            Span<char> chars = colRef.Slice(index + 1);
+#if NETSTANDARD2_1_OR_GREATER
+            return new string(chars);
+#else
+            return new string(chars.ToArray());
+#endif
         }
-        internal class CellRefPartsInner
-        {
-            public String sheetName;
-            public String rowRef;
-            public String colRef;
 
-            public CellRefPartsInner(String sheetName, String rowRef, String colRef)
-            {
-                this.sheetName = sheetName;
-                this.rowRef = rowRef ?? "";
-                this.colRef = colRef ?? "";
-            }
-        }
+        private readonly record struct CellRefPartsInner(String sheetName, String rowRef, String colRef);
+
         /**
          * Separates the row from the columns and returns an array of three Strings.  The first element
          * is the sheet name. Only the first element may be null.  The second element in is the column 
@@ -576,7 +628,7 @@ namespace NPOI.SS.Util
          * @param rowStr a string of only digit characters
          * @return <c>true</c> if the row and col parameters are within range of a BIFF8 spreadsheet.
          */
-        public static bool CellReferenceIsWithinRange(String colStr, String rowStr, SpreadsheetVersion ssVersion)
+        public static bool CellReferenceIsWithinRange(ReadOnlySpan<char> colStr, ReadOnlySpan<char> rowStr, SpreadsheetVersion ssVersion)
         {
             if (!IsColumnWithinRange(colStr, ssVersion))
             {
@@ -589,22 +641,27 @@ namespace NPOI.SS.Util
          * @deprecated 3.15 beta 2. Use {@link #isColumnWithinRange}.
          */
         [Obsolete("deprecated 3.15 beta 2. Use {@link #isColumnWithinRange}.")]
-        public static bool IsColumnWithnRange(String colStr, SpreadsheetVersion ssVersion)
+        public static bool IsColumnWithnRange(ReadOnlySpan<char> colStr, SpreadsheetVersion ssVersion)
         {
             return IsColumnWithinRange(colStr, ssVersion);
         }
-        public static bool IsRowWithinRange(String rowStr, SpreadsheetVersion ssVersion)
+        public static bool IsRowWithinRange(ReadOnlySpan<char> rowStr, SpreadsheetVersion ssVersion)
         {
+#if NETSTANDARD2_1_OR_GREATER
             int rowNum = int.Parse(rowStr) - 1;
+#else
+            int rowNum = int.Parse(rowStr.ToString()) - 1;
+#endif
             return 0 <= rowNum && rowNum <= ssVersion.LastRowIndex;
         }
 
         [Obsolete("deprecated 3.15 beta 2. Use {@link #isRowWithinRange}")]
-        public static bool isRowWithnRange(String rowStr, SpreadsheetVersion ssVersion)
+        public static bool isRowWithnRange(ReadOnlySpan<char> rowStr, SpreadsheetVersion ssVersion)
         {
             return IsRowWithinRange(rowStr, ssVersion);
         }
-        public static bool IsColumnWithinRange(String colStr, SpreadsheetVersion ssVersion)
+
+        public static bool IsColumnWithinRange(ReadOnlySpan<char> colStr, SpreadsheetVersion ssVersion)
         {
             String lastCol = ssVersion.LastColumnName;
             int lastColLength = lastCol.Length;
@@ -618,7 +675,7 @@ namespace NPOI.SS.Util
             if (numberOfLetters == lastColLength)
             {
                 //if (colStr.ToUpper().CompareTo(lastCol) > 0)
-                if (string.Compare(colStr.ToUpper(), lastCol, StringComparison.Ordinal) > 0)
+                if (colStr.CompareTo(lastCol.AsSpan(), StringComparison.OrdinalIgnoreCase) > 0)
                 {
                     return false;
                 }

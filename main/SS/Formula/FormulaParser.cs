@@ -1173,9 +1173,8 @@ namespace NPOI.SS.Formula
             }
             return new AreaReference(part1.CellReference, part2.CellReference);
         }
-        private string CELL_REF_PATTERN = "(\\$?[A-Za-z]+)?(\\$?[0-9]+)?";
 
-
+        private static readonly Regex CellRefPatternRegex = new Regex("(\\$?[A-Za-z]+)?(\\$?[0-9]+)?", RegexOptions.Compiled, matchTimeout: TimeSpan.FromSeconds(1));
 
 
         /**
@@ -1215,9 +1214,7 @@ namespace NPOI.SS.Formula
             }
             String rep = _formulaString.Substring(_pointer - 1, ptr - _pointer + 1);
 
-            Regex pattern = new Regex(CELL_REF_PATTERN);
-
-            if (!pattern.IsMatch(rep))
+            if (!CellRefPatternRegex.IsMatch(rep))
             {
                 return null;
             }
@@ -1231,7 +1228,8 @@ namespace NPOI.SS.Formula
             }
             else if (hasLetters)
             {
-                if (!CellReference.IsColumnWithinRange(rep.Replace("$", ""), _ssVersion))
+                // TODO
+                if (!CellReference.IsColumnWithinRange(rep.ToString().Replace("$", "").AsSpan(), _ssVersion))
                 {
                     return null;
                 }

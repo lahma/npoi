@@ -50,15 +50,19 @@ namespace NPOI.SS.Util
         }
         public String FormatAsString()
         {
-            return FormatAsString(null, false);
+            return FormatAsString("", false);
         }
+
         /**
          * @return the text format of this range using specified sheet name.
          */
         public String FormatAsString(String sheetName, bool useAbsoluteAddress)
+            => FormatAsString(sheetName.AsSpan(), useAbsoluteAddress);
+
+        internal String FormatAsString(ReadOnlySpan<char> sheetName, bool useAbsoluteAddress)
         {
             StringBuilder sb = new StringBuilder();
-            if (sheetName != null)
+            if (sheetName.Length > 0)
             {
                 sb.Append(SheetNameFormatter.Format(sheetName));
                 sb.Append("!");
